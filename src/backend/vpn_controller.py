@@ -154,6 +154,18 @@ class VpnController:
                 _logger.warning("Erreur CLI (statut) : %s", status["error"])
             else:
                 status = parse_status(raw["stdout"])
+                # Si la commande a échoué (returncode non nul) et que le VPN
+                # n'est pas connecté, on vérifie la présence du fichier de
+                # configuration pour informer l'utilisateur dès le démarrage.
+                if raw["returncode"] != 0 and not status["connected"]:
+                    config_check = cli_check_config()
+                    if config_check["status"] == "error":
+                        status["error"] = config_check.get(
+                            "message", "Configuration CyberGhost introuvable."
+                        )
+                        _logger.warning(
+                            "Configuration manquante détectée au rafraîchissement."
+                        )
                 _logger.debug("Statut parsé : connected=%s", status["connected"])
             with self._lock:
                 self._status = status

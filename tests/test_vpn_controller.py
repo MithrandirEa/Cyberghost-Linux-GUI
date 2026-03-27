@@ -325,6 +325,61 @@ class TestRefreshStatus:
 
         assert executed_in[0] is not caller_thread
 
+    def test_missing_config_surfaced_when_status_fails(self) -> None:
+        """CLI en erreur (returncode!=0) + config absente → clé 'error' dans le callback."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        with (
+            patch("backend.vpn_controller.cli_get_status",
+                  return_value=_raw_failed(stderr="config missing")),
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_error()),
+        ):
+            controller.refresh_status(
+                lambda s: (received.append(s), event.set())
+            )
+            _wait(event)
+
+        assert received[0]["connected"] is False
+        assert "error" in received[0]
+        assert "introuvable" in received[0]["error"]
+
+    def test_config_not_checked_when_status_succeeds(self) -> None:
+        """CLI réussie (returncode=0) → cli_check_config() n'est pas appelé."""
+        controller = VpnController()
+        event = threading.Event()
+
+        with (
+            patch("backend.vpn_controller.cli_get_status",
+                  return_value=_raw_ok(_STATUS_NOT_CONNECTED)),
+            patch("backend.vpn_controller.cli_check_config") as mock_check,
+        ):
+            controller.refresh_status(lambda _: event.set())
+            _wait(event)
+
+        mock_check.assert_not_called()
+
+    def test_config_not_checked_when_connected(self) -> None:
+        """VPN connecté (returncode!=0 improbable mais possible) → pas de vérif config."""
+        controller = VpnController()
+        event = threading.Event()
+
+        # Simule un returncode non nul tout en étant connecté (cas théorique).
+        failed_but_connected = dict(_raw_failed())
+        failed_but_connected["stdout"] = _STATUS_CONNECTED_TABLE
+
+        with (
+            patch("backend.vpn_controller.cli_get_status",
+                  return_value=failed_but_connected),
+            patch("backend.vpn_controller.cli_check_config") as mock_check,
+        ):
+            controller.refresh_status(lambda _: event.set())
+            _wait(event)
+
+        mock_check.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # VpnController.load_countries
