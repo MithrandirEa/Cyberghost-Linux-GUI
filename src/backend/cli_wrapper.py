@@ -6,6 +6,7 @@ standardisé.
 """
 
 import logging
+import os
 import re
 import subprocess
 from typing import Any
@@ -88,6 +89,37 @@ def _run(cmd: list[str]) -> dict[str, Any]:
         }
 
 
+def _get_home() -> str:
+    """Retourne le répertoire HOME de l'utilisateur courant."""
+    return os.environ.get("HOME", os.path.expanduser("~"))
+
+
+def check_config() -> dict[str, Any]:
+    """
+    Vérifie si le fichier de configuration de CyberGhost existe.
+
+    Retourne un dictionnaire standardisé avec status='ok' si le fichier est
+    présent, status='error' sinon (avec un message explicite).
+    Le chemin vérifié est $HOME/.cyberghost/config.ini.
+    """
+    config_path = os.path.join(_get_home(), ".cyberghost", "config.ini")
+    if os.path.isfile(config_path):
+        return {"status": "ok", "stdout": "", "stderr": "", "returncode": 0}
+    msg = (
+        f"Le fichier de configuration CyberGhost est introuvable : "
+        f"« {config_path} ».\n"
+        "Veuillez d'abord vous authentifier avec : cyberghostvpn --setup"
+    )
+    _logger.warning(msg)
+    return {
+        "status": "error",
+        "stdout": "",
+        "stderr": "",
+        "returncode": -1,
+        "message": msg,
+    }
+
+
 def get_status() -> dict[str, Any]:
     """
     Exécute `cyberghostvpn --status` et retourne le résultat brut.
@@ -119,8 +151,10 @@ def connect(country_code: str) -> dict[str, Any]:
             " Attendu : 2 lettres majuscules (ex : FR, DE)."
         )
     return _run(
-        ["pkexec", "cyberghostvpn", "--country-code", country_code,
-         "--connect"]
+        [
+            "pkexec", "env", f"HOME={_get_home()}",
+            "cyberghostvpn", "--country-code", country_code, "--connect",
+        ]
     )
 
 
@@ -130,4 +164,4 @@ def disconnect() -> dict[str, Any]:
     Utilise pkexec pour déclencher une boîte de dialogue
     Polkit native (élévation root).
     """
-    return _run(["pkexec", "cyberghostvpn", "--stop"])
+    return _run(["pkexec", "env", f"HOME={_get_home()}", "cyberghostvpn", "--stop"])

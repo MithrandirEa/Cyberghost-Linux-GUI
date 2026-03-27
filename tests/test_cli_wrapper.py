@@ -10,6 +10,7 @@ import subprocess
 
 import backend.cli_wrapper as _wrapper
 from backend.cli_wrapper import (
+    check_config,
     connect,
     disconnect,
     get_countries,
@@ -205,6 +206,20 @@ class TestConnect:
         args = mock.call_args[0][0]
         assert args[0] == "pkexec"
 
+    def test_includes_env_command(self) -> None:
+        """connect() utilise 'env' après pkexec pour transmettre HOME."""
+        with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
+            connect("FR")
+        args = mock.call_args[0][0]
+        assert "env" in args
+
+    def test_includes_home_variable(self) -> None:
+        """connect() transmet HOME= comme argument d'env."""
+        with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
+            connect("FR")
+        args = mock.call_args[0][0]
+        assert any(a.startswith("HOME=") for a in args)
+
     def test_includes_country_code(self) -> None:
         """connect() transmet le code pays à la commande."""
         with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
@@ -265,6 +280,20 @@ class TestDisconnect:
         args = mock.call_args[0][0]
         assert args[0] == "pkexec"
 
+    def test_includes_env_command(self) -> None:
+        """disconnect() utilise 'env' après pkexec pour transmettre HOME."""
+        with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
+            disconnect()
+        args = mock.call_args[0][0]
+        assert "env" in args
+
+    def test_includes_home_variable(self) -> None:
+        """disconnect() transmet HOME= comme argument d'env."""
+        with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
+            disconnect()
+        args = mock.call_args[0][0]
+        assert any(a.startswith("HOME=") for a in args)
+
     def test_includes_stop_flag(self) -> None:
         """disconnect() inclut le flag --stop."""
         with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
@@ -278,3 +307,40 @@ class TestDisconnect:
         with patch.object(_wrapper, "_run", return_value=expected):
             result = disconnect()
         assert result is expected
+
+
+# ---------------------------------------------------------------------------
+# check_config
+# ---------------------------------------------------------------------------
+
+class TestCheckConfig:
+    def test_returns_ok_when_config_exists(self, tmp_path: Any) -> None:
+        """Retourne status='ok' si le fichier config.ini existe."""
+        config_dir = tmp_path / ".cyberghost"
+        config_dir.mkdir()
+        (config_dir / "config.ini").write_text("[General]")
+        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+            result = _wrapper.check_config()
+        assert result["status"] == "ok"
+        assert result["returncode"] == 0
+
+    def test_returns_error_when_config_missing(self, tmp_path: Any) -> None:
+        """Retourne status='error' si le fichier config.ini est absent."""
+        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+            result = _wrapper.check_config()
+        assert result["status"] == "error"
+        assert result["returncode"] == -1
+        assert "message" in result
+
+    def test_error_message_contains_config_path(self, tmp_path: Any) -> None:
+        """Le message d'erreur mentionne le chemin du fichier manquant."""
+        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+            result = _wrapper.check_config()
+        assert ".cyberghost" in result["message"]
+        assert "config.ini" in result["message"]
+
+    def test_error_message_contains_setup_hint(self, tmp_path: Any) -> None:
+        """Le message d'erreur inclut une indication pour lancer --setup."""
+        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+            result = _wrapper.check_config()
+        assert "--setup" in result["message"]
