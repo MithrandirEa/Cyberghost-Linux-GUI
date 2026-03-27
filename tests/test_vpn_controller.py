@@ -386,6 +386,22 @@ class TestLoadCountries:
 # VpnController.connect
 # ---------------------------------------------------------------------------
 
+def _config_check_ok() -> dict[str, Any]:
+    """Simule un check_config() réussi (fichier de config présent)."""
+    return {"status": "ok", "stdout": "", "stderr": "", "returncode": 0}
+
+
+def _config_check_error() -> dict[str, Any]:
+    """Simule un check_config() en échec (fichier de config absent)."""
+    return {
+        "status": "error",
+        "stdout": "",
+        "stderr": "",
+        "returncode": -1,
+        "message": "Le fichier de configuration CyberGhost est introuvable.",
+    }
+
+
 class TestConnect:
     def test_success_callback_connected(self) -> None:
         """Connexion réussie (returncode=0) → callback avec connected=True."""
@@ -394,6 +410,8 @@ class TestConnect:
         received: list[dict[str, Any]] = []
 
         with (
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_ok()),
             patch("backend.vpn_controller.cli_connect",
                   return_value=_raw_ok()),
             patch("backend.vpn_controller.cli_get_status",
@@ -411,8 +429,12 @@ class TestConnect:
         event = threading.Event()
         received: list[dict[str, Any]] = []
 
-        with patch("backend.vpn_controller.cli_connect",
-                   return_value=_raw_failed(stdout="Auth failed")):
+        with (
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_ok()),
+            patch("backend.vpn_controller.cli_connect",
+                  return_value=_raw_failed(stdout="Auth failed")),
+        ):
             controller.connect("FR",
                                lambda s: (received.append(s), event.set()))
             _wait(event)
@@ -425,6 +447,8 @@ class TestConnect:
         event = threading.Event()
 
         with (
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_ok()),
             patch("backend.vpn_controller.cli_connect",
                   return_value=_raw_failed()),
             patch("backend.vpn_controller.cli_get_status") as mock_status,
@@ -446,6 +470,8 @@ class TestConnect:
             event.set()
 
         with (
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_ok()),
             patch("backend.vpn_controller.cli_connect",
                   return_value=_raw_failed()),
         ):
@@ -453,6 +479,28 @@ class TestConnect:
             _wait(event)
 
         assert executed_in[0] is not caller_thread
+
+    def test_missing_config_returns_error_without_calling_connect(
+        self,
+    ) -> None:
+        """Config absente → callback avec 'error', cli_connect() non appelé."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        with (
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_error()),
+            patch("backend.vpn_controller.cli_connect") as mock_connect,
+        ):
+            controller.connect(
+                "FR", lambda s: (received.append(s), event.set())
+            )
+            _wait(event)
+
+        assert "error" in received[0]
+        assert received[0]["connected"] is False
+        mock_connect.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

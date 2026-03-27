@@ -13,6 +13,7 @@ from typing import Any, Callable
 _logger = logging.getLogger(__name__)
 
 from backend.cli_wrapper import (
+    check_config as cli_check_config,
     connect as cli_connect,
     disconnect as cli_disconnect,
     get_countries as cli_get_countries,
@@ -189,6 +190,20 @@ class VpnController:
         """
 
         def _task() -> None:
+            # Vérification préalable : le fichier de config doit exister
+            config_check = cli_check_config()
+            if config_check["status"] == "error":
+                with self._lock:
+                    status = dict(self._status)
+                status["error"] = config_check.get(
+                    "message", "Configuration CyberGhost introuvable."
+                )
+                _logger.error(
+                    "Configuration manquante : %s", status["error"]
+                )
+                callback(status)
+                return
+
             try:
                 result = cli_connect(country_code)
             except ValueError as exc:
