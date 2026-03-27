@@ -1,5 +1,12 @@
 # CyberGhost GUI — Interface graphique Linux pour CyberGhost VPN
 
+[![Licence MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![CustomTkinter](https://img.shields.io/badge/UI-CustomTkinter-5C9BD6?logo=python&logoColor=white)](https://github.com/TomSchimansky/CustomTkinter)
+[![Tests](https://img.shields.io/badge/tests-69%20pass%C3%A9s-brightgreen?logo=pytest&logoColor=white)](tests/)
+[![Plateforme](https://img.shields.io/badge/plateforme-Linux%20%2F%20Ubuntu-orange?logo=linux&logoColor=white)]()
+[![Style](https://img.shields.io/badge/style-PEP%208-black)]()
+
 Interface graphique desktop (Linux / Ubuntu) construite avec CustomTkinter pour piloter le client VPN officiel **CyberGhost** en ligne de commande (`cyberghostvpn`).
 
 > **Ce projet est un wrapper.** Il n'implémente aucun protocole réseau. Il exécute les commandes du CLI officiel CyberGhost en arrière-plan et parse leurs sorties pour mettre à jour l'interface graphique.
