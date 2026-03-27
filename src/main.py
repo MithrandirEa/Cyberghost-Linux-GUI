@@ -1,0 +1,26 @@
+"""
+main.py — Point d'entrée de CyberGhost-GUI.
+Lance l'interface graphique en initialisant le thème
+CustomTkinter et le contrôleur VPN.
+Usage : python src/main.py
+"""
+
+import customtkinter as ctk
+
+from backend.vpn_controller import VpnController
+from ui.app_window import AppWindow
+
+
+def main() -> None:
+    """Initialise et lance l'application CyberGhost-GUI."""
+    # Thème adaptatif au système (Light/Dark) avec palette de couleurs bleue
+    ctk.set_appearance_mode("System")
+    ctk.set_default_color_theme("blue")
+
+    controller = VpnController()
+    app = AppWindow(controller)
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
