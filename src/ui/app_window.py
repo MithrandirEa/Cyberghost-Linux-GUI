@@ -20,6 +20,7 @@ _TXT_BTN_DISCONNECT = "Se déconnecter"
 _TXT_BTN_CONNECTING = "Connexion en cours…"
 _TXT_BTN_DISCONNECTING = "Déconnexion en cours…"
 _TXT_IP_PREFIX = "IP : "
+_TXT_SERVER_PREFIX = "Serveur : "
 _TXT_LOADING = "Chargement des pays…"
 _TXT_NO_COUNTRIES = "Aucun pays disponible"
 _TXT_INVALID_COUNTRY = "Veuillez sélectionner un pays valide."
@@ -50,10 +51,13 @@ class AppWindow(ctk.CTk):
         # stockées après construction de l'UI
         self._btn_default_fg: Any = None
         self._btn_default_hover: Any = None
+        # Identifiant du prochain appel de polling (pour annulation propre)
+        self._poll_id: str | None = None
 
         self.title("CyberGhost GUI")
-        self.geometry("440x330")
+        self.geometry("440x370")
         self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_ui()
 
@@ -64,6 +68,7 @@ class AppWindow(ctk.CTk):
         # Chargement initial des données (non bloquants)
         self._load_countries()
         self._refresh_status()
+        self._schedule_refresh()
 
     # -------------------------------------------------------------------------
     # Construction de l'UI
@@ -91,7 +96,14 @@ class AppWindow(ctk.CTk):
             text=f"{_TXT_IP_PREFIX}N/A",
             font=ctk.CTkFont(size=13),
         )
-        self._ip_label.grid(row=1, column=0, padx=20, pady=(0, 14))
+        self._ip_label.grid(row=1, column=0, padx=20, pady=(0, 2))
+
+        self._server_label = ctk.CTkLabel(
+            header,
+            text="",
+            font=ctk.CTkFont(size=12),
+        )
+        self._server_label.grid(row=2, column=0, padx=20, pady=(0, 14))
 
         # --- Sélection du pays ---
         ctk.CTkLabel(
@@ -154,6 +166,25 @@ class AppWindow(ctk.CTk):
 
         self._controller.refresh_status(_callback)
 
+    def _schedule_refresh(self) -> None:
+        """
+        Planifie un rafraîchissement automatique du statut toutes les 30 s.
+        Permet de détecter une déconnexion inattendue sans action utilisateur.
+        """
+        self._poll_id = self.after(30_000, self._poll)
+
+    def _poll(self) -> None:
+        """Callback du polling périodique : rafraîchit le statut puis replanifie."""
+        self._refresh_status()
+        self._schedule_refresh()
+
+    def _on_close(self) -> None:
+        """Annule le polling en cours et ferme la fenêtre proprement."""
+        if self._poll_id is not None:
+            self.after_cancel(self._poll_id)
+            self._poll_id = None
+        self.destroy()
+
     # -------------------------------------------------------------------------
     # Callbacks thread-safe (appelés uniquement depuis le thread principal)
     # -------------------------------------------------------------------------
@@ -207,8 +238,18 @@ class AppWindow(ctk.CTk):
             )
 
         self._ip_label.configure(text=f"{_TXT_IP_PREFIX}{ip}")
+        server = status.get("server", "N/A")
+        if self._is_connected and server and server != "N/A":
+            self._server_label.configure(
+                text=f"{_TXT_SERVER_PREFIX}{server}"
+            )
+        else:
+            self._server_label.configure(text="")
         self._error_label.configure(text=error if error else "")
         self._action_button.configure(state="normal")
+        # Réactivation de la combobox si des pays sont disponibles
+        if self._countries:
+            self._country_combo.configure(state="normal")
 
     # -------------------------------------------------------------------------
     # Gestionnaires d'événements UI
@@ -243,6 +284,7 @@ class AppWindow(ctk.CTk):
 
         country_code = match.group(1)
         self._action_button.configure(text=_TXT_BTN_CONNECTING)
+        self._country_combo.configure(state="disabled")
 
         def _callback(status: dict[str, Any]) -> None:
             self.after(0, self._update_ui, status)
@@ -252,6 +294,7 @@ class AppWindow(ctk.CTk):
     def _do_disconnect(self) -> None:
         """Lance la déconnexion VPN via le contrôleur."""
         self._action_button.configure(text=_TXT_BTN_DISCONNECTING)
+        self._country_combo.configure(state="disabled")
 
         def _callback(status: dict[str, Any]) -> None:
             self.after(0, self._update_ui, status)

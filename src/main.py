@@ -5,6 +5,7 @@ CustomTkinter et le contrôleur VPN.
 Usage : python3 src/main.py
 """
 
+import logging
 import sys
 
 try:
@@ -24,6 +25,10 @@ from ui.app_window import AppWindow
 
 def main() -> None:
     """Initialise et lance l'application CyberGhost-GUI."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
     # Thème adaptatif au système (Light/Dark) avec palette de couleurs bleue
     ctk.set_appearance_mode("System")
     ctk.set_default_color_theme("blue")

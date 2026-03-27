@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Tests backend (avec couverture)
+        run: |
+          python -m pytest tests/test_cli_wrapper.py tests/test_vpn_controller.py \
+            --cov=src/backend \
+            --cov-report=term-missing \
+            -v
+
+      - name: Installer Xvfb pour les tests UI
+        run: sudo apt-get install -y xvfb
+
+      - name: Tests UI (serveur d'affichage virtuel)
+        run: xvfb-run python -m pytest tests/test_app_window.py -v

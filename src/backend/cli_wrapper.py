@@ -5,9 +5,15 @@ Chaque fonction exécute une commande shell et retourne un dictionnaire
 standardisé.
 """
 
+import logging
 import re
 import subprocess
 from typing import Any
+
+_logger = logging.getLogger(__name__)
+
+# Délai maximum (secondes) accordé à chaque commande CLI.
+_CMD_TIMEOUT = 15
 
 
 def strip_ansi(text: str) -> str:
@@ -29,13 +35,16 @@ def _run(cmd: list[str]) -> dict[str, Any]:
         - message (str)  : message d'erreur lisible (présent
           uniquement si status == "error")
     """
+    _logger.debug("Exécution : %s", " ".join(cmd))
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             check=False,
+            timeout=_CMD_TIMEOUT,
         )
+        _logger.debug("returncode=%d", result.returncode)
         return {
             "status": "ok",
             "stdout": strip_ansi(result.stdout),
@@ -43,17 +52,33 @@ def _run(cmd: list[str]) -> dict[str, Any]:
             "returncode": result.returncode,
         }
     except FileNotFoundError:
+        msg = (
+            f"Commande introuvable : « {cmd[0]} » "
+            "n'est pas installé ou absent du PATH."
+        )
+        _logger.error(msg)
         return {
             "status": "error",
             "stdout": "",
             "stderr": "",
             "returncode": -1,
-            "message": (
-                f"Commande introuvable : « {cmd[0]} » "
-                "n'est pas installé ou absent du PATH."
-            ),
+            "message": msg,
+        }
+    except subprocess.TimeoutExpired:
+        msg = (
+            f"Délai dépassé ({_CMD_TIMEOUT}s) pour la commande"
+            f" « {cmd[0]} »."
+        )
+        _logger.error(msg)
+        return {
+            "status": "error",
+            "stdout": "",
+            "stderr": "",
+            "returncode": -1,
+            "message": msg,
         }
     except Exception as exc:
+        _logger.error("Erreur inattendue : %s", exc)
         return {
             "status": "error",
             "stdout": "",
@@ -85,7 +110,14 @@ def connect(country_code: str) -> dict[str, Any]:
     `pkexec cyberghostvpn --country-code CODE --connect`.
     Utilise pkexec pour déclencher une boîte de dialogue
     Polkit native (élévation root).
+    Lève ValueError si country_code n'est pas un code ISO-3166 valide
+    (exactement 2 lettres majuscules).
     """
+    if not re.fullmatch(r"[A-Z]{2}", country_code):
+        raise ValueError(
+            f"Code pays invalide : « {country_code} »."
+            " Attendu : 2 lettres majuscules (ex : FR, DE)."
+        )
     return _run(
         ["pkexec", "cyberghostvpn", "--country-code", country_code,
          "--connect"]

@@ -5,9 +5,12 @@ Ce module fait le lien entre le wrapper CLI (couche basse)
 et l'interface graphique (couche haute).
 """
 
+import logging
 import re
 import threading
 from typing import Any, Callable
+
+_logger = logging.getLogger(__name__)
 
 from backend.cli_wrapper import (
     connect as cli_connect,
@@ -123,11 +126,14 @@ class VpnController:
     def __init__(self) -> None:
         # Dernier statut connu du VPN
         self._status: dict[str, Any] = dict(DEFAULT_STATUS)
+        # Verrou protégeant _status contre les accès concurrents
+        self._lock = threading.Lock()
 
     @property
     def current_status(self) -> dict[str, Any]:
         """Retourne une copie défensive de l'état VPN actuel."""
-        return dict(self._status)
+        with self._lock:
+            return dict(self._status)
 
     def refresh_status(
         self, callback: Callable[[dict[str, Any]], None]
@@ -144,9 +150,12 @@ class VpnController:
             if raw["status"] == "error":
                 status = dict(DEFAULT_STATUS)
                 status["error"] = raw.get("message", raw["stderr"])
+                _logger.warning("Erreur CLI (statut) : %s", status["error"])
             else:
                 status = parse_status(raw["stdout"])
-            self._status = status
+                _logger.debug("Statut parsé : connected=%s", status["connected"])
+            with self._lock:
+                self._status = status
             callback(status)
 
         threading.Thread(target=_task, daemon=True).start()
@@ -180,13 +189,23 @@ class VpnController:
         """
 
         def _task() -> None:
-            result = cli_connect(country_code)
+            try:
+                result = cli_connect(country_code)
+            except ValueError as exc:
+                with self._lock:
+                    status = dict(self._status)
+                status["error"] = str(exc)
+                _logger.error("Code pays invalide : %s", exc)
+                callback(status)
+                return
             if result["returncode"] != 0:
-                status = dict(self._status)
+                with self._lock:
+                    status = dict(self._status)
                 status["error"] = result.get(
                     "message",
                     result["stderr"] or result["stdout"] or "Erreur inconnue.",
                 )
+                _logger.warning("Échec connexion : %s", status["error"])
                 callback(status)
             else:
                 self.refresh_status(callback)
@@ -204,11 +223,13 @@ class VpnController:
         def _task() -> None:
             result = cli_disconnect()
             if result["returncode"] != 0:
-                status = dict(self._status)
+                with self._lock:
+                    status = dict(self._status)
                 status["error"] = result.get(
                     "message",
                     result["stderr"] or result["stdout"] or "Erreur inconnue.",
                 )
+                _logger.warning("Échec déconnexion : %s", status["error"])
                 callback(status)
             else:
                 self.refresh_status(callback)

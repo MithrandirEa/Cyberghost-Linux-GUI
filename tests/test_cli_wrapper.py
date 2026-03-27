@@ -6,6 +6,8 @@ entièrement via des mocks (subprocess jamais appelé réellement).
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import subprocess
+
 import backend.cli_wrapper as _wrapper
 from backend.cli_wrapper import (
     connect,
@@ -151,6 +153,15 @@ class TestRun:
         _, kwargs = mock_run.call_args
         assert kwargs.get("check") is False
 
+    def test_timeout_expired_returns_error(self) -> None:
+        """Retourne status='error' quand subprocess dépasse le délai imparti."""
+        exc = subprocess.TimeoutExpired(cmd="cyberghostvpn", timeout=15)
+        with patch("subprocess.run", side_effect=exc):
+            result = _wrapper._run(["cyberghostvpn", "--status"])
+        assert result["status"] == "error"
+        assert result["returncode"] == -1
+        assert "Délai" in result["message"]
+
 
 # ---------------------------------------------------------------------------
 # Fonctions publiques : vérification des commandes construites
@@ -226,6 +237,24 @@ class TestConnect:
             connect("DE")
         assert "FR" in calls[0]
         assert "DE" in calls[1]
+
+    def test_invalid_country_code_raises_value_error(self) -> None:
+        """connect() lève ValueError si le code pays n'est pas 2 majuscules."""
+        import pytest
+        with pytest.raises(ValueError, match="Code pays invalide"):
+            connect("france")
+
+    def test_lowercase_code_raises_value_error(self) -> None:
+        """Un code en minuscules lève ValueError."""
+        import pytest
+        with pytest.raises(ValueError):
+            connect("fr")
+
+    def test_too_long_code_raises_value_error(self) -> None:
+        """Un code de plus de 2 lettres lève ValueError."""
+        import pytest
+        with pytest.raises(ValueError):
+            connect("FRA")
 
 
 class TestDisconnect:
