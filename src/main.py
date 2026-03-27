@@ -2,10 +2,21 @@
 main.py — Point d'entrée de CyberGhost-GUI.
 Lance l'interface graphique en initialisant le thème
 CustomTkinter et le contrôleur VPN.
-Usage : python src/main.py
+Usage : python3 src/main.py
 """
 
-import customtkinter as ctk
+import sys
+
+try:
+    import customtkinter as ctk
+except ModuleNotFoundError:
+    print(
+        "Erreur : le module 'customtkinter' est introuvable.\n"
+        "Veuillez installer les dépendances avec :\n"
+        "    pip3 install -r requirements.txt",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 from backend.vpn_controller import VpnController
 from ui.app_window import AppWindow
