@@ -103,8 +103,11 @@ def _get_effective_home() -> str:
     Permet de passer le bon HOME à pkexec même quand l'application est
     lancée en root mais que la configuration CyberGhost appartient à
     l'utilisateur réel (ex: /home/user/.cyberghost → HOME=/home/user).
+    Si le chemin configuré n'a pas de répertoire parent valide,
+    retourne le HOME courant comme valeur de repli.
     """
-    return os.path.dirname(get_cyberghost_config_dir())
+    parent = os.path.dirname(get_cyberghost_config_dir())
+    return parent if parent else _get_home()
 
 
 def check_config() -> dict[str, Any]:

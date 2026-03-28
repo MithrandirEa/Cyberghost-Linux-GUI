@@ -5,6 +5,7 @@ Il délègue toutes les opérations VPN au VpnController
 via des callbacks thread-safe.
 """
 
+import os
 import re
 from tkinter import filedialog
 from typing import Any, Callable
@@ -347,7 +348,7 @@ class _SettingsDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self._on_save = on_save
         self.title(_TXT_SETTINGS_TITLE)
-        self.geometry("500x190")
+        self.geometry("500x220")
         self.resizable(False, False)
         # Fenêtre modale : bloque les interactions avec la fenêtre parente
         self.grab_set()
@@ -394,9 +395,22 @@ class _SettingsDialog(ctk.CTkToplevel):
             hover_color="gray30",
         ).grid(row=0, column=1, padx=8)
 
+        self._warning_label = ctk.CTkLabel(
+            self,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color=_COLOR_DISCONNECTED,
+            wraplength=460,
+        )
+        self._warning_label.grid(
+            row=3, column=0, columnspan=2, padx=20, pady=(0, 8)
+        )
+
     def _browse(self) -> None:
         """Ouvre un sélecteur de dossier natif."""
-        current = self._path_entry.get().strip() or "/"
+        current = self._path_entry.get().strip()
+        if not current or not os.path.isdir(current):
+            current = get_cyberghost_config_dir()
         path = filedialog.askdirectory(
             title="Sélectionner le répertoire .cyberghost",
             initialdir=current,
@@ -409,8 +423,18 @@ class _SettingsDialog(ctk.CTkToplevel):
     def _save(self) -> None:
         """Enregistre le chemin configuré et déclenche un rafraîchissement du statut."""
         path = self._path_entry.get().strip()
-        if path:
-            set_cyberghost_config_dir(path)
+        if not path:
+            self._warning_label.configure(
+                text="Veuillez saisir un chemin valide."
+            )
+            return
+        if not os.path.isdir(path):
+            self._warning_label.configure(
+                text=f"Attention : le répertoire « {path} » n'existe pas encore. "
+                "Assurez-vous d'exécuter cyberghostvpn --setup au préalable."
+            )
+            # Continue saving — the directory may be created by --setup later
+        set_cyberghost_config_dir(path)
         self.destroy()
         if self._on_save is not None:
             self._on_save()
