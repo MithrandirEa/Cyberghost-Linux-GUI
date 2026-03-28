@@ -130,13 +130,19 @@ def _ensure_single_symlink(root_cyberghost: str, config_dir: str) -> None:
     """
     Crée ou corrige le lien symbolique root_cyberghost → config_dir.
 
-    Ne fait rien si le répertoire parent du lien n'existe pas en tant que
-    répertoire réel (ce qui évite de créer des chemins intermédiaires).
+    Si le répertoire parent n'existe pas, tente de le créer (le processus
+    s'exécute en root via pkexec et dispose des droits nécessaires).
+    En cas d'échec de création du parent, abandonne silencieusement.
     Silencieux si les chemins coïncident déjà.
     """
     parent = os.path.dirname(root_cyberghost)
     if not os.path.isdir(parent):
-        return  # Le home parent n'existe pas — rien à faire
+        try:
+            os.makedirs(parent, mode=0o755, exist_ok=True)
+            _logger.debug("Répertoire créé : %r", parent)
+        except OSError as exc:
+            _logger.warning("Impossible de créer le répertoire %r : %s", parent, exc)
+            return
 
     if os.path.abspath(config_dir) == os.path.abspath(root_cyberghost):
         return  # Les chemins coïncident déjà, rien à faire

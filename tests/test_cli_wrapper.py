@@ -547,12 +547,28 @@ class TestEnsureRootConfigSymlink:
         assert (home_a / ".cyberghost").is_symlink(), "Symlink manquant dans home_a"
         assert (home_b / ".cyberghost").is_symlink(), "Symlink manquant dans home_b"
 
-    def test_single_symlink_skips_nonexistent_parent(self, tmp_path: Path) -> None:
-        """_ensure_single_symlink ne crée rien si le répertoire parent n'existe pas."""
+    def test_single_symlink_creates_parent_if_missing(self, tmp_path: Path) -> None:
+        """_ensure_single_symlink crée le répertoire parent s'il n'existe pas."""
+        config_dir = str(tmp_path / "user" / ".cyberghost")
+        new_home = tmp_path / "newroot"
+        root_cyberghost = str(new_home / ".cyberghost")
+        # new_home n'existe pas encore
+        assert not new_home.exists()
+
+        _ensure_single_symlink(root_cyberghost, config_dir)
+
+        assert new_home.is_dir(), "Le répertoire parent doit avoir été créé"
+        assert Path(root_cyberghost).is_symlink(), "Le symlink doit exister"
+
+    def test_single_symlink_skips_when_parent_creation_fails(self, tmp_path: Path) -> None:
+        """_ensure_single_symlink abandonne si la création du parent échoue."""
         config_dir = str(tmp_path / "user" / ".cyberghost")
         nonexistent = str(tmp_path / "ghost" / ".cyberghost")
 
-        with patch("backend.cli_wrapper.os.symlink") as mock_symlink:
+        with (
+            patch("backend.cli_wrapper.os.makedirs", side_effect=OSError("permission denied")),
+            patch("backend.cli_wrapper.os.symlink") as mock_symlink,
+        ):
             _ensure_single_symlink(nonexistent, config_dir)
 
         mock_symlink.assert_not_called()
