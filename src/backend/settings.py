@@ -6,9 +6,12 @@ Stocke les paramètres dans ~/.config/cyberghost-gui/settings.ini
 """
 
 import configparser
+import logging
 import os
 import pwd
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 _SECTION = "General"
 _KEY_CONFIG_DIR = "cyberghost_config_dir"
@@ -27,18 +30,28 @@ def _get_real_user_home() -> str:
     sudo_user = os.environ.get("SUDO_USER")
     if sudo_user:
         try:
-            return pwd.getpwnam(sudo_user).pw_dir
+            home = pwd.getpwnam(sudo_user).pw_dir
+            _logger.debug("HOME déduit via SUDO_USER=%r → %r", sudo_user, home)
+            return home
         except KeyError:
-            pass
+            _logger.debug("SUDO_USER=%r non trouvé dans /etc/passwd", sudo_user)
 
     pkexec_uid_str = os.environ.get("PKEXEC_UID")
     if pkexec_uid_str:
         try:
-            return pwd.getpwuid(int(pkexec_uid_str)).pw_dir
+            home = pwd.getpwuid(int(pkexec_uid_str)).pw_dir
+            _logger.debug(
+                "HOME déduit via PKEXEC_UID=%r → %r", pkexec_uid_str, home
+            )
+            return home
         except (KeyError, ValueError):
-            pass
+            _logger.debug(
+                "PKEXEC_UID=%r invalide ou absent du système", pkexec_uid_str
+            )
 
-    return str(Path.home())
+    home = str(Path.home())
+    _logger.debug("HOME via Path.home() (fallback) → %r", home)
+    return home
 
 
 def _settings_file() -> Path:
@@ -49,7 +62,11 @@ def _settings_file() -> Path:
     else:
         home = _get_real_user_home()
         base = Path(home) / ".config"
-    return base / "cyberghost-gui" / "settings.ini"
+    path = base / "cyberghost-gui" / "settings.ini"
+    _logger.debug(
+        "Fichier de paramètres : %r (existe=%s)", str(path), path.exists()
+    )
+    return path
 
 
 def _default_cyberghost_config_dir() -> str:
@@ -65,8 +82,11 @@ def get_cyberghost_config_dir() -> str:
     sinon retourne la valeur par défaut ($HOME/.cyberghost).
     """
     cfg = configparser.ConfigParser()
-    cfg.read(str(_settings_file()), encoding="utf-8")
-    return cfg.get(_SECTION, _KEY_CONFIG_DIR, fallback=_default_cyberghost_config_dir())
+    settings_path = _settings_file()
+    cfg.read(str(settings_path), encoding="utf-8")
+    result = cfg.get(_SECTION, _KEY_CONFIG_DIR, fallback=_default_cyberghost_config_dir())
+    _logger.debug("Répertoire CyberGhost retourné : %r", result)
+    return result
 
 
 def set_cyberghost_config_dir(path: str) -> None:

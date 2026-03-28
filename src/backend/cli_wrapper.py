@@ -121,7 +121,14 @@ def check_config() -> dict[str, Any]:
     """
     config_dir = get_cyberghost_config_dir()
     config_path = os.path.join(config_dir, "config.ini")
-    if os.path.isfile(config_path):
+    dir_exists = os.path.isdir(config_dir)
+    file_exists = os.path.isfile(config_path)
+    readable = os.access(config_path, os.R_OK) if file_exists else False
+    _logger.debug(
+        "check_config — répertoire=%r (isdir=%s) | fichier=%r (isfile=%s, readable=%s)",
+        config_dir, dir_exists, config_path, file_exists, readable,
+    )
+    if file_exists:
         return {"status": "ok", "stdout": "", "stderr": "", "returncode": 0}
     msg = (
         f"Le fichier de configuration CyberGhost est introuvable : "
