@@ -10,6 +10,7 @@ from unittest.mock import patch
 from backend.vpn_controller import (
     DEFAULT_STATUS,
     VpnController,
+    _format_cli_error,
     parse_countries,
     parse_status,
 )
@@ -232,6 +233,81 @@ class TestParseCountriesEdgeCases:
 
 
 # ---------------------------------------------------------------------------
+# _format_cli_error
+# ---------------------------------------------------------------------------
+
+_TRACEBACK_CONFIG_MISSING = """\
+Traceback (most recent call last):
+  File "cyberghostvpn.py", line 762, in <module>
+  File "cyberghostvpn.py", line 433, in main
+  File "libs/config.py", line 45, in __init__
+  File "libs/config.py", line 112, in readConfigFile
+Exception: The config file "/home/root/.cyberghost/config.ini" does not exist!
+[558928] Failed to execute script 'cyberghostvpn' due to unhandled exception!
+"""
+
+_TRACEBACK_GENERIC = """\
+Traceback (most recent call last):
+  File "cyberghostvpn.py", line 200, in main
+  File "libs/vpn.py", line 50, in connect
+RuntimeError: Connection refused
+"""
+
+_TRACEBACK_NO_EXCEPTION_LINE = """\
+Traceback (most recent call last):
+  File "cyberghostvpn.py", line 1, in <module>
+"""
+
+
+class TestFormatCliError:
+    def test_empty_string_returns_generic_message(self) -> None:
+        """Chaîne vide → message générique 'Erreur inconnue.'."""
+        assert _format_cli_error("") == "Erreur inconnue."
+
+    def test_config_missing_traceback_returns_setup_hint(self) -> None:
+        """Traceback avec config manquante → message avec --setup."""
+        result = _format_cli_error(_TRACEBACK_CONFIG_MISSING)
+        assert "--setup" in result
+        assert "Traceback" not in result
+
+    def test_config_missing_traceback_no_raw_path(self) -> None:
+        """Le chemin brut du fichier ne doit pas apparaître dans le message."""
+        result = _format_cli_error(_TRACEBACK_CONFIG_MISSING)
+        assert "/home/root/.cyberghost/config.ini" not in result
+
+    def test_generic_traceback_returns_internal_error_message(self) -> None:
+        """Traceback générique → message d'erreur interne générique."""
+        result = _format_cli_error(_TRACEBACK_GENERIC)
+        assert "Traceback" not in result
+        assert result  # non vide
+
+    def test_traceback_without_exception_line_returns_generic(self) -> None:
+        """Traceback sans ligne Exception: → message générique."""
+        result = _format_cli_error(_TRACEBACK_NO_EXCEPTION_LINE)
+        assert "Traceback" not in result
+
+    def test_plain_error_message_returned_as_is(self) -> None:
+        """Message simple (pas de traceback) → retourné tel quel."""
+        msg = "Authentication failed"
+        assert _format_cli_error(msg) == msg
+
+    def test_multiline_non_traceback_stripped(self) -> None:
+        """Sortie multi-ligne sans traceback → retournée nettoyée."""
+        result = _format_cli_error("  some error  \n")
+        assert result == "some error"
+
+    def test_exception_line_extracted_correctly(self) -> None:
+        """La ligne Exception: est extraite correctement."""
+        raw = (
+            'Traceback (most recent call last):\n'
+            '  File "x.py", line 1, in <module>\n'
+            'Exception: Auth failed'
+        )
+        result = _format_cli_error(raw)
+        assert result == "Auth failed"
+
+
+# ---------------------------------------------------------------------------
 # VpnController.refresh_status
 # ---------------------------------------------------------------------------
 
@@ -379,6 +455,32 @@ class TestRefreshStatus:
             _wait(event)
 
         mock_check.assert_not_called()
+
+    def test_cli_error_shown_when_status_fails_but_config_ok(self) -> None:
+        """CLI en erreur (returncode!=0) + config présente → clé 'error' avec erreur CLI nettoyée."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        traceback_output = (
+            'Traceback (most recent call last):\n'
+            '  File "cyberghostvpn.py", line 1, in main\n'
+            'Exception: Some internal error'
+        )
+        with (
+            patch("backend.vpn_controller.cli_get_status",
+                  return_value=_raw_failed(stderr=traceback_output)),
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_ok()),
+        ):
+            controller.refresh_status(
+                lambda s: (received.append(s), event.set())
+            )
+            _wait(event)
+
+        assert received[0]["connected"] is False
+        assert "error" in received[0]
+        assert "Traceback" not in received[0]["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -557,6 +659,35 @@ class TestConnect:
         assert received[0]["connected"] is False
         mock_connect.assert_not_called()
 
+    def test_cli_traceback_in_stderr_is_sanitized(self) -> None:
+        """Traceback Python dans stderr → message lisible sans traceback brut."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        traceback_stderr = (
+            'Traceback (most recent call last):\n'
+            '  File "cyberghostvpn.py", line 762, in <module>\n'
+            'Exception: The config file "/home/root/.cyberghost/config.ini" '
+            'does not exist!\n'
+            "[558928] Failed to execute script 'cyberghostvpn' "
+            "due to unhandled exception!\n"
+        )
+        with (
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_ok()),
+            patch("backend.vpn_controller.cli_connect",
+                  return_value=_raw_failed(stderr=traceback_stderr)),
+        ):
+            controller.connect(
+                "FR", lambda s: (received.append(s), event.set())
+            )
+            _wait(event)
+
+        assert "error" in received[0]
+        assert "Traceback" not in received[0]["error"]
+        assert "--setup" in received[0]["error"]
+
 
 # ---------------------------------------------------------------------------
 # VpnController.disconnect
@@ -592,6 +723,25 @@ class TestDisconnect:
             _wait(event)
 
         assert "error" in received[0]
+
+    def test_cli_traceback_in_stderr_is_sanitized(self) -> None:
+        """Traceback Python dans stderr lors d'une déconnexion → message lisible."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        traceback_stderr = (
+            'Traceback (most recent call last):\n'
+            '  File "cyberghostvpn.py", line 50, in main\n'
+            'Exception: Some internal error\n'
+        )
+        with patch("backend.vpn_controller.cli_disconnect",
+                   return_value=_raw_failed(stderr=traceback_stderr)):
+            controller.disconnect(lambda s: (received.append(s), event.set()))
+            _wait(event)
+
+        assert "error" in received[0]
+        assert "Traceback" not in received[0]["error"]
 
     def test_failure_does_not_call_cli_get_status(self) -> None:
         """En cas d'échec de déconnexion, cli_get_status() n'est pas appelé."""
