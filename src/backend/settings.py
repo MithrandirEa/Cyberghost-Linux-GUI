@@ -8,8 +8,19 @@ Stocke les paramètres dans ~/.config/cyberghost-gui/settings.ini
 import configparser
 import logging
 import os
-import pwd
+import types
 from pathlib import Path
+
+try:
+    import pwd
+except ImportError:  # pragma: no cover — module POSIX uniquement (non-Windows)
+    def _getpw_stub(*_args):  # noqa: D103
+        raise KeyError("pwd non disponible sur cette plateforme")
+
+    pwd = types.SimpleNamespace(  # type: ignore[assignment]
+        getpwnam=_getpw_stub,
+        getpwuid=_getpw_stub,
+    )
 
 _logger = logging.getLogger(__name__)
 

@@ -7,10 +7,18 @@ standardisé.
 
 import logging
 import os
-import pwd
 import re
 import subprocess
+import types
 from typing import Any
+
+try:
+    import pwd
+except ImportError:  # pragma: no cover — module POSIX uniquement (non-Windows)
+    def _getpwuid_stub(uid: int):  # noqa: D103
+        raise KeyError(uid)
+
+    pwd = types.SimpleNamespace(getpwuid=_getpwuid_stub)  # type: ignore[assignment]
 
 from backend.settings import get_cyberghost_config_dir
 
@@ -18,6 +26,10 @@ _logger = logging.getLogger(__name__)
 
 # Délai maximum (secondes) accordé à chaque commande CLI.
 _CMD_TIMEOUT = 15
+
+# Homes de root couverts en plus de pwd.getpwuid(0). Certaines distributions
+# (ex. : Ubuntu avec un compte root personnalisé) utilisent /home/root.
+_FIXED_ROOT_HOMES: tuple[str, ...] = ("/root", "/home/root")
 
 
 def strip_ansi(text: str) -> str:
@@ -114,24 +126,17 @@ def _get_effective_home() -> str:
     return parent if parent else _get_home()
 
 
-def _ensure_root_config_symlink() -> None:
+def _ensure_single_symlink(root_cyberghost: str, config_dir: str) -> None:
     """
-    Crée si nécessaire un lien symbolique entre le répertoire .cyberghost
-    de root (résolu par pwd.getpwuid(0)) et le répertoire de configuration
-    réel de l'utilisateur.
+    Crée ou corrige le lien symbolique root_cyberghost → config_dir.
 
-    cyberghostvpn ignore la variable HOME et utilise pwd.getpwuid(0).pw_dir
-    pour localiser sa configuration quand il s'exécute en root via pkexec.
-    Ce lien garantit qu'il trouve les bons fichiers de configuration.
+    Ne fait rien si le répertoire parent du lien n'existe pas en tant que
+    répertoire réel (ce qui évite de créer des chemins intermédiaires).
+    Silencieux si les chemins coïncident déjà.
     """
-    config_dir = get_cyberghost_config_dir()
-    try:
-        root_home = pwd.getpwuid(0).pw_dir
-    except KeyError:
-        _logger.debug("_ensure_root_config_symlink : uid 0 introuvable dans /etc/passwd")
-        return
-
-    root_cyberghost = os.path.join(root_home, ".cyberghost")
+    parent = os.path.dirname(root_cyberghost)
+    if not os.path.isdir(parent):
+        return  # Le home parent n'existe pas — rien à faire
 
     if os.path.abspath(config_dir) == os.path.abspath(root_cyberghost):
         return  # Les chemins coïncident déjà, rien à faire
@@ -164,6 +169,36 @@ def _ensure_root_config_symlink() -> None:
         _logger.warning(
             "Impossible de créer le lien symbolique %r : %s", root_cyberghost, exc
         )
+
+
+def _ensure_root_config_symlink() -> None:
+    """
+    Crée si nécessaire un lien symbolique .cyberghost dans chaque répertoire
+    home candidat pour root.
+
+    cyberghostvpn peut utiliser HOME (fixé par pkexec) ou pwd.getpwuid(0)
+    pour localiser sa configuration. Sur certains systèmes le home de root
+    dans /etc/passwd est /home/root (et non /root). Cette fonction couvre
+    les deux cas en tentant de créer le lien dans tous les homes candidats
+    dont le répertoire parent existe réellement.
+
+    Candidats : pwd.getpwuid(0).pw_dir, /root, /home/root.
+    """
+    config_dir = get_cyberghost_config_dir()
+
+    candidates: set[str] = set()
+    try:
+        candidates.add(os.path.realpath(pwd.getpwuid(0).pw_dir))
+    except KeyError:
+        _logger.debug("_ensure_root_config_symlink : uid 0 introuvable dans /etc/passwd")
+
+    # Homes fixes fréquents selon les distributions Linux
+    for fixed in _FIXED_ROOT_HOMES:
+        if os.path.isdir(fixed):
+            candidates.add(os.path.realpath(fixed))
+
+    for root_home in candidates:
+        _ensure_single_symlink(os.path.join(root_home, ".cyberghost"), config_dir)
 
 
 def check_config() -> dict[str, Any]:

@@ -13,6 +13,8 @@ import subprocess
 import backend.cli_wrapper as _wrapper
 from backend.cli_wrapper import (
     _ensure_root_config_symlink,
+    _ensure_single_symlink,
+    _FIXED_ROOT_HOMES,
     check_config,
     connect,
     disconnect,
@@ -417,27 +419,20 @@ class TestRunSetup:
 class TestEnsureRootConfigSymlink:
     """Tests de la création du lien symbolique root/.cyberghost."""
 
-    def _base_patches(self, config_dir: str, root_home: str):
-        """Retourne les patches communs à tous les tests."""
-        import pwd as _pwd
-        fake_pw = _pwd.struct_passwd(("root", "x", 0, 0, "", root_home, "/bin/sh"))
-        return [
-            patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir),
-            patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw),
-        ]
-
     def test_creates_symlink_when_absent(self, tmp_path: Path) -> None:
         """Crée le lien si root_cyberghost n'existe pas encore."""
         config_dir = str(tmp_path / "user" / ".cyberghost")
         root_home = str(tmp_path / "root")
         (tmp_path / "root").mkdir()
         root_cyberghost = str(tmp_path / "root" / ".cyberghost")
+        fake_pw = MagicMock(pw_dir=root_home)
 
-        with patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir):
-            import pwd as _pwd
-            fake_pw = _pwd.struct_passwd(("root", "x", 0, 0, "", root_home, "/bin/sh"))
-            with patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw):
-                _ensure_root_config_symlink()
+        with (
+            patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir),
+            patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw),
+            patch("backend.cli_wrapper._FIXED_ROOT_HOMES", ()),
+        ):
+            _ensure_root_config_symlink()
 
         assert Path(root_cyberghost).is_symlink()
         assert os.path.realpath(root_cyberghost) == os.path.realpath(config_dir)
@@ -449,30 +444,34 @@ class TestEnsureRootConfigSymlink:
         (tmp_path / "root").mkdir()
         root_cyberghost = tmp_path / "root" / ".cyberghost"
         root_cyberghost.symlink_to(config_dir)
+        fake_pw = MagicMock(pw_dir=root_home)
 
-        with patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir):
-            import pwd as _pwd
-            fake_pw = _pwd.struct_passwd(("root", "x", 0, 0, "", root_home, "/bin/sh"))
-            with patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw):
-                with patch("backend.cli_wrapper.os.symlink") as mock_symlink:
-                    _ensure_root_config_symlink()
+        with (
+            patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir),
+            patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw),
+            patch("backend.cli_wrapper._FIXED_ROOT_HOMES", ()),
+            patch("backend.cli_wrapper.os.symlink") as mock_symlink,
+        ):
+            _ensure_root_config_symlink()
 
         mock_symlink.assert_not_called()
 
     def test_replaces_incorrect_symlink(self, tmp_path: Path) -> None:
-        """Supprime et recréé le lien s'il existe mais pointe ailleurs."""
+        """Supprime et recrée le lien s'il existe mais pointe ailleurs."""
         config_dir = str(tmp_path / "user" / ".cyberghost")
         wrong_target = str(tmp_path / "other")
         root_home = str(tmp_path / "root")
         (tmp_path / "root").mkdir()
         root_cyberghost = tmp_path / "root" / ".cyberghost"
         root_cyberghost.symlink_to(wrong_target)
+        fake_pw = MagicMock(pw_dir=root_home)
 
-        with patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir):
-            import pwd as _pwd
-            fake_pw = _pwd.struct_passwd(("root", "x", 0, 0, "", root_home, "/bin/sh"))
-            with patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw):
-                _ensure_root_config_symlink()
+        with (
+            patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir),
+            patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw),
+            patch("backend.cli_wrapper._FIXED_ROOT_HOMES", ()),
+        ):
+            _ensure_root_config_symlink()
 
         assert Path(root_cyberghost).is_symlink()
         assert os.path.realpath(str(root_cyberghost)) == os.path.realpath(config_dir)
@@ -481,13 +480,15 @@ class TestEnsureRootConfigSymlink:
         """Ne crée pas de lien si config_dir et root_cyberghost sont identiques."""
         root_home = str(tmp_path)
         config_dir = str(tmp_path / ".cyberghost")
+        fake_pw = MagicMock(pw_dir=root_home)
 
-        with patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir):
-            import pwd as _pwd
-            fake_pw = _pwd.struct_passwd(("root", "x", 0, 0, "", root_home, "/bin/sh"))
-            with patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw):
-                with patch("backend.cli_wrapper.os.symlink") as mock_symlink:
-                    _ensure_root_config_symlink()
+        with (
+            patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir),
+            patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw),
+            patch("backend.cli_wrapper._FIXED_ROOT_HOMES", ()),
+            patch("backend.cli_wrapper.os.symlink") as mock_symlink,
+        ):
+            _ensure_root_config_symlink()
 
         mock_symlink.assert_not_called()
 
@@ -497,13 +498,15 @@ class TestEnsureRootConfigSymlink:
         root_home = str(tmp_path / "root")
         root_cyberghost = tmp_path / "root" / ".cyberghost"
         root_cyberghost.mkdir(parents=True)
+        fake_pw = MagicMock(pw_dir=root_home)
 
-        with patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir):
-            import pwd as _pwd
-            fake_pw = _pwd.struct_passwd(("root", "x", 0, 0, "", root_home, "/bin/sh"))
-            with patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw):
-                with patch("backend.cli_wrapper.os.symlink") as mock_symlink:
-                    _ensure_root_config_symlink()
+        with (
+            patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir),
+            patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw),
+            patch("backend.cli_wrapper._FIXED_ROOT_HOMES", ()),
+            patch("backend.cli_wrapper.os.symlink") as mock_symlink,
+        ):
+            _ensure_root_config_symlink()
 
         mock_symlink.assert_not_called()
 
@@ -524,3 +527,32 @@ class TestEnsureRootConfigSymlink:
         ):
             disconnect()
         mock_sym.assert_called_once()
+
+    def test_creates_symlink_for_both_root_homes(self, tmp_path: Path) -> None:
+        """Crée un lien dans chaque home candidat si les deux répertoires existent."""
+        config_dir = str(tmp_path / "user" / ".cyberghost")
+        home_a = tmp_path / "root_a"  # simulé comme pwd.getpwuid(0).pw_dir
+        home_b = tmp_path / "root_b"  # simulé comme candidat fixe
+        home_a.mkdir()
+        home_b.mkdir()
+        fake_pw = MagicMock(pw_dir=str(home_a))
+
+        with (
+            patch("backend.cli_wrapper.get_cyberghost_config_dir", return_value=config_dir),
+            patch("backend.cli_wrapper.pwd.getpwuid", return_value=fake_pw),
+            patch("backend.cli_wrapper._FIXED_ROOT_HOMES", (str(home_b),)),
+        ):
+            _ensure_root_config_symlink()
+
+        assert (home_a / ".cyberghost").is_symlink(), "Symlink manquant dans home_a"
+        assert (home_b / ".cyberghost").is_symlink(), "Symlink manquant dans home_b"
+
+    def test_single_symlink_skips_nonexistent_parent(self, tmp_path: Path) -> None:
+        """_ensure_single_symlink ne crée rien si le répertoire parent n'existe pas."""
+        config_dir = str(tmp_path / "user" / ".cyberghost")
+        nonexistent = str(tmp_path / "ghost" / ".cyberghost")
+
+        with patch("backend.cli_wrapper.os.symlink") as mock_symlink:
+            _ensure_single_symlink(nonexistent, config_dir)
+
+        mock_symlink.assert_not_called()
