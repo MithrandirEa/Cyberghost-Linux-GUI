@@ -7,10 +7,38 @@ Stocke les paramètres dans ~/.config/cyberghost-gui/settings.ini
 
 import configparser
 import os
+import pwd
 from pathlib import Path
 
 _SECTION = "General"
 _KEY_CONFIG_DIR = "cyberghost_config_dir"
+
+
+def _get_real_user_home() -> str:
+    """
+    Retourne le répertoire home de l'utilisateur réel.
+
+    Quand l'application est lancée avec des privilèges élevés (sudo ou pkexec),
+    $HOME pointe vers /root au lieu du home de l'utilisateur réel.
+    Cette fonction consulte SUDO_USER (défini par sudo) et PKEXEC_UID
+    (défini par pkexec) pour retrouver le home correct, avant de
+    retourner $HOME comme valeur de repli.
+    """
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        try:
+            return pwd.getpwnam(sudo_user).pw_dir
+        except KeyError:
+            pass
+
+    pkexec_uid_str = os.environ.get("PKEXEC_UID")
+    if pkexec_uid_str:
+        try:
+            return pwd.getpwuid(int(pkexec_uid_str)).pw_dir
+        except (KeyError, ValueError):
+            pass
+
+    return str(Path.home())
 
 
 def _settings_file() -> Path:
@@ -19,15 +47,14 @@ def _settings_file() -> Path:
     if xdg_config:
         base = Path(xdg_config)
     else:
-        home = os.environ.get("HOME", str(Path.home()))
+        home = _get_real_user_home()
         base = Path(home) / ".config"
     return base / "cyberghost-gui" / "settings.ini"
 
 
 def _default_cyberghost_config_dir() -> str:
     """Retourne le répertoire de configuration CyberGhost par défaut : $HOME/.cyberghost."""
-    home = os.environ.get("HOME", str(Path.home()))
-    return str(Path(home) / ".cyberghost")
+    return str(Path(_get_real_user_home()) / ".cyberghost")
 
 
 def get_cyberghost_config_dir() -> str:
