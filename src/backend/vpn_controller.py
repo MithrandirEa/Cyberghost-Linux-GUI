@@ -20,6 +20,42 @@ from backend.cli_wrapper import (
     get_status as cli_get_status,
 )
 
+def _format_cli_error(output: str) -> str:
+    """
+    Extrait un message d'erreur lisible depuis la sortie brute du CLI.
+    Évite d'afficher des tracebacks Python complets à l'utilisateur.
+
+    - Si la sortie contient une ligne "Exception: ...", retourne ce message
+      (en substituant l'erreur de config par un message actionnable).
+    - Si la sortie ressemble à un traceback Python, retourne un message générique.
+    - Sinon retourne la sortie nettoyée.
+    """
+    if not output:
+        return "Erreur inconnue."
+
+    # Cherche la dernière ligne "Exception: ..." dans la sortie
+    for line in reversed(output.splitlines()):
+        line_stripped = line.strip()
+        if line_stripped.startswith("Exception:"):
+            exc_msg = line_stripped[len("Exception:"):].strip()
+            # Erreur de config manquante → message clair et actionnable
+            if re.search(r"config\b.*\bnot\s+exist|config.*introuvable", exc_msg, re.IGNORECASE):
+                return (
+                    "Le fichier de configuration CyberGhost est introuvable. "
+                    "Lancez d'abord : cyberghostvpn --setup"
+                )
+            return exc_msg
+
+    # Traceback Python détecté sans ligne Exception identifiable
+    if "Traceback (most recent call last)" in output and re.search(r'^\s*File "', output, re.MULTILINE):
+        return (
+            "Le client CyberGhost a rencontré une erreur interne. "
+            "Vérifiez votre installation et votre configuration."
+        )
+
+    return output.strip()
+
+
 # Valeur par défaut retournée lorsque le statut ne peut pas être déterminé.
 DEFAULT_STATUS: dict[str, Any] = {
     "connected": False,
@@ -166,6 +202,16 @@ class VpnController:
                         _logger.warning(
                             "Configuration manquante détectée au rafraîchissement."
                         )
+                    else:
+                        # La config existe mais le CLI a quand même échoué :
+                        # on affiche l'erreur CLI nettoyée.
+                        cli_err = raw.get("stderr") or raw.get("stdout") or ""
+                        if cli_err:
+                            status["error"] = _format_cli_error(cli_err)
+                            _logger.warning(
+                                "Erreur CLI (statut, config présente) : %s",
+                                status["error"],
+                            )
                 _logger.debug("Statut parsé : connected=%s", status["connected"])
             with self._lock:
                 self._status = status
@@ -228,10 +274,11 @@ class VpnController:
             if result["returncode"] != 0:
                 with self._lock:
                     status = dict(self._status)
-                status["error"] = result.get(
+                raw_error = result.get(
                     "message",
-                    result["stderr"] or result["stdout"] or "Erreur inconnue.",
+                    result["stderr"] or result["stdout"] or "",
                 )
+                status["error"] = _format_cli_error(raw_error)
                 _logger.warning("Échec connexion : %s", status["error"])
                 callback(status)
             else:
@@ -252,10 +299,11 @@ class VpnController:
             if result["returncode"] != 0:
                 with self._lock:
                     status = dict(self._status)
-                status["error"] = result.get(
+                raw_error = result.get(
                     "message",
-                    result["stderr"] or result["stdout"] or "Erreur inconnue.",
+                    result["stderr"] or result["stdout"] or "",
                 )
+                status["error"] = _format_cli_error(raw_error)
                 _logger.warning("Échec déconnexion : %s", status["error"])
                 callback(status)
             else:
