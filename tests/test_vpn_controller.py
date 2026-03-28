@@ -482,6 +482,26 @@ class TestRefreshStatus:
         assert "error" in received[0]
         assert "Traceback" not in received[0]["error"]
 
+    def test_not_connected_output_no_error(self) -> None:
+        """CLI returncode=1 + 'Not connected' en stdout → pas de clé 'error' (état normal)."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        with (
+            patch("backend.vpn_controller.cli_get_status",
+                  return_value=_raw_failed(stdout="Status: Not connected")),
+            patch("backend.vpn_controller.cli_check_config") as mock_check,
+        ):
+            controller.refresh_status(
+                lambda s: (received.append(s), event.set())
+            )
+            _wait(event)
+
+        assert received[0]["connected"] is False
+        assert "error" not in received[0]
+        mock_check.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # VpnController.load_countries
@@ -801,3 +821,73 @@ class TestCurrentStatus:
     def test_default_state_country_is_na(self) -> None:
         """L'état initial a country='N/A'."""
         assert VpnController().current_status["country"] == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# VpnController.run_setup
+# ---------------------------------------------------------------------------
+
+class TestVpnControllerRunSetup:
+    def test_success_calls_check_config(self) -> None:
+        """Après --setup réussi, le callback reçoit le résultat de cli_check_config()."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        with (
+            patch("backend.vpn_controller.cli_run_setup",
+                  return_value={"status": "ok", "stdout": "", "stderr": "", "returncode": 0}),
+            patch("backend.vpn_controller.cli_check_config",
+                  return_value=_config_check_ok()),
+        ):
+            controller.run_setup(lambda r: (received.append(r), event.set()))
+            _wait(event)
+
+        assert received[0]["status"] == "ok"
+
+    def test_failure_returns_error(self) -> None:
+        """Si --setup échoue (returncode!=0), le callback reçoit status='error'."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        with patch("backend.vpn_controller.cli_run_setup",
+                   return_value={"status": "ok", "stdout": "", "stderr": "auth failed", "returncode": 1}):
+            controller.run_setup(lambda r: (received.append(r), event.set()))
+            _wait(event)
+
+        assert received[0]["status"] == "error"
+        assert "message" in received[0]
+
+    def test_cli_error_status_returns_error(self) -> None:
+        """Si cli_run_setup() retourne status='error', le callback reçoit status='error'."""
+        controller = VpnController()
+        event = threading.Event()
+        received: list[dict[str, Any]] = []
+
+        with patch("backend.vpn_controller.cli_run_setup",
+                   return_value={"status": "error", "message": "pkexec absent", "returncode": -1, "stdout": "", "stderr": ""}):
+            controller.run_setup(lambda r: (received.append(r), event.set()))
+            _wait(event)
+
+        assert received[0]["status"] == "error"
+
+    def test_runs_in_separate_thread(self) -> None:
+        """run_setup() ne bloque pas le thread appelant."""
+        controller = VpnController()
+        caller_thread = threading.current_thread()
+        executed_in: list[threading.Thread] = []
+        event = threading.Event()
+
+        def _cb(r: dict[str, Any]) -> None:
+            executed_in.append(threading.current_thread())
+            event.set()
+
+        with patch("backend.vpn_controller.cli_run_setup",
+                   return_value={"status": "ok", "stdout": "", "stderr": "", "returncode": 0}):
+            with patch("backend.vpn_controller.cli_check_config",
+                       return_value=_config_check_ok()):
+                controller.run_setup(_cb)
+                _wait(event)
+
+        assert executed_in[0] is not caller_thread

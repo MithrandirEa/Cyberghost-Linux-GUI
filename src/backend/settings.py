@@ -65,7 +65,7 @@ def get_cyberghost_config_dir() -> str:
     sinon retourne la valeur par défaut ($HOME/.cyberghost).
     """
     cfg = configparser.ConfigParser()
-    cfg.read(str(_settings_file()))
+    cfg.read(str(_settings_file()), encoding="utf-8")
     return cfg.get(_SECTION, _KEY_CONFIG_DIR, fallback=_default_cyberghost_config_dir())
 
 
@@ -78,7 +78,7 @@ def set_cyberghost_config_dir(path: str) -> None:
     settings_path = _settings_file()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     cfg = configparser.ConfigParser()
-    cfg.read(str(settings_path))
+    cfg.read(str(settings_path), encoding="utf-8")
     if _SECTION not in cfg:
         cfg[_SECTION] = {}
     cfg[_SECTION][_KEY_CONFIG_DIR] = path

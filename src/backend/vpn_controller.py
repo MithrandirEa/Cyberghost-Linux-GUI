@@ -18,6 +18,7 @@ from backend.cli_wrapper import (
     disconnect as cli_disconnect,
     get_countries as cli_get_countries,
     get_status as cli_get_status,
+    run_setup as cli_run_setup,
 )
 
 def _format_cli_error(output: str) -> str:
@@ -191,27 +192,35 @@ class VpnController:
             else:
                 status = parse_status(raw["stdout"])
                 # Si la commande a échoué (returncode non nul) et que le VPN
-                # n'est pas connecté, on vérifie la présence du fichier de
-                # configuration pour informer l'utilisateur dès le démarrage.
+                # n'est pas connecté, on distingue l'état "débranché normal"
+                # (le CLI renvoie 1 + "Not connected") des vraies erreurs.
                 if raw["returncode"] != 0 and not status["connected"]:
-                    config_check = cli_check_config()
-                    if config_check["status"] == "error":
-                        status["error"] = config_check.get(
-                            "message", "Configuration CyberGhost introuvable."
-                        )
-                        _logger.warning(
-                            "Configuration manquante détectée au rafraîchissement."
-                        )
+                    combined = (raw.get("stdout") or "") + " " + (raw.get("stderr") or "")
+                    if re.search(
+                        r"\b(not\s+connected|disconnected)\b", combined, re.IGNORECASE
+                    ):
+                        # État débranché normal : pas d'erreur à afficher.
+                        pass
                     else:
-                        # La config existe mais le CLI a quand même échoué :
-                        # on affiche l'erreur CLI nettoyée.
-                        cli_err = raw.get("stderr") or raw.get("stdout") or ""
-                        if cli_err:
-                            status["error"] = _format_cli_error(cli_err)
-                            _logger.warning(
-                                "Erreur CLI (statut, config présente) : %s",
-                                status["error"],
+                        # Autre échec : on vérifie si la config est présente.
+                        config_check = cli_check_config()
+                        if config_check["status"] == "error":
+                            status["error"] = config_check.get(
+                                "message", "Configuration CyberGhost introuvable."
                             )
+                            _logger.warning(
+                                "Configuration manquante détectée au rafraîchissement."
+                            )
+                        else:
+                            # La config existe mais le CLI a quand même échoué :
+                            # on affiche l'erreur CLI nettoyée (stderr prioritaire).
+                            cli_err = raw.get("stderr") or raw.get("stdout") or ""
+                            if cli_err:
+                                status["error"] = _format_cli_error(cli_err)
+                                _logger.warning(
+                                    "Erreur CLI (statut, config présente) : %s",
+                                    status["error"],
+                                )
                 _logger.debug("Statut parsé : connected=%s", status["connected"])
             with self._lock:
                 self._status = status
@@ -308,5 +317,30 @@ class VpnController:
                 callback(status)
             else:
                 self.refresh_status(callback)
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def run_setup(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """
+        Exécute `cyberghostvpn --setup` en arrière-plan (thread daemon).
+
+        En cas de succès de la commande, vérifie que le fichier config.ini
+        a bien été créé et appelle callback avec {'status': 'ok'}.
+        En cas d'échec, appelle callback avec {'status': 'error', 'message': ...}.
+        """
+
+        def _task() -> None:
+            result = cli_run_setup()
+            if result["status"] == "error" or result["returncode"] != 0:
+                raw_err = result.get("message") or _format_cli_error(
+                    result.get("stderr", "") or result.get("stdout", "")
+                )
+                _logger.error("Échec --setup : %s", raw_err)
+                callback({"status": "error", "message": raw_err})
+                return
+            # Vérifie que la configuration a bien été créée.
+            config_check = cli_check_config()
+            _logger.info("--setup terminé, vérification config : %s", config_check["status"])
+            callback(config_check)
 
         threading.Thread(target=_task, daemon=True).start()

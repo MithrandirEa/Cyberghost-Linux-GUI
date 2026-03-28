@@ -138,6 +138,18 @@ def check_config() -> dict[str, Any]:
     }
 
 
+def run_setup() -> dict[str, Any]:
+    """
+    Exécute `pkexec cyberghostvpn --setup` pour initialiser la configuration.
+
+    Utilise pkexec pour déclencher une boîte de dialogue Polkit native
+    (élévation root). Transmet le HOME effectif afin que CyberGhost écrive
+    la configuration dans le bon répertoire utilisateur.
+    """
+    home = _get_effective_home()
+    return _run(["pkexec", "env", f"HOME={home}", "cyberghostvpn", "--setup"])
+
+
 def get_status() -> dict[str, Any]:
     """
     Exécute `cyberghostvpn --status` et retourne le résultat brut.

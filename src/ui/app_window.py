@@ -7,6 +7,7 @@ via des callbacks thread-safe.
 
 import os
 import re
+import tkinter as tk
 from tkinter import filedialog
 from typing import Any, Callable
 
@@ -34,6 +35,9 @@ _TXT_SETTINGS_BROWSE = "Parcourir…"
 _TXT_SETTINGS_SAVE = "Enregistrer"
 _TXT_SETTINGS_CANCEL = "Annuler"
 _TXT_SETTINGS_SAVED = "Paramètres enregistrés."
+_TXT_SETUP_BTN = "⚙ Lancer cyberghostvpn --setup"
+_TXT_SETUP_RUNNING = "Initialisation en cours…"
+_COLOR_VALID = "#2fa572"
 
 # --- Couleurs sémantiques ---
 _COLOR_CONNECTED = "#2fa572"
@@ -326,7 +330,7 @@ class AppWindow(ctk.CTk):
 
     def _open_settings(self) -> None:
         """Ouvre la fenêtre de paramètres de l'application."""
-        _SettingsDialog(self, on_save=self._refresh_status)
+        _SettingsDialog(self, controller=self._controller, on_save=self._refresh_status)
 
 
 # ---------------------------------------------------------------------------
@@ -343,14 +347,21 @@ class _SettingsDialog(ctk.CTkToplevel):
     def __init__(
         self,
         parent: ctk.CTk,
+        controller: VpnController,
         on_save: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
+        self._controller = controller
         self._on_save = on_save
         self.title(_TXT_SETTINGS_TITLE)
-        self.geometry("500x220")
+        self.geometry("500x280")
         self.resizable(False, False)
+        # StringVar liée à l'entrée pour détecter les changements en temps réel.
+        self._path_var = tk.StringVar(value=get_cyberghost_config_dir())
         self._build()
+        self._path_var.trace_add("write", self._on_path_change)
+        # Validation initiale.
+        self._on_path_change()
         # Fenêtre modale : différé via after() pour garantir que la fenêtre
         # est visible avant l'appel à grab_set() (évite TclError).
         self.after(10, self.grab_set)
@@ -366,8 +377,7 @@ class _SettingsDialog(ctk.CTkToplevel):
             anchor="w",
         ).grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 4), sticky="w")
 
-        self._path_entry = ctk.CTkEntry(self, width=360)
-        self._path_entry.insert(0, get_cyberghost_config_dir())
+        self._path_entry = ctk.CTkEntry(self, width=360, textvariable=self._path_var)
         self._path_entry.grid(
             row=1, column=0, padx=(20, 4), pady=4, sticky="ew"
         )
@@ -379,8 +389,19 @@ class _SettingsDialog(ctk.CTkToplevel):
             command=self._browse,
         ).grid(row=1, column=1, padx=(0, 20), pady=4)
 
+        # Label de validation live (vert = config.ini présent, rouge = absent).
+        self._validation_label = ctk.CTkLabel(
+            self,
+            text="",
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+        )
+        self._validation_label.grid(
+            row=2, column=0, columnspan=2, padx=20, pady=(2, 0), sticky="w"
+        )
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=(16, 20))
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=(12, 4))
 
         ctk.CTkButton(
             btn_frame,
@@ -396,6 +417,16 @@ class _SettingsDialog(ctk.CTkToplevel):
             hover_color="gray30",
         ).grid(row=0, column=1, padx=8)
 
+        # Bouton --setup (masqué si config.ini présent).
+        self._setup_button = ctk.CTkButton(
+            self,
+            text=_TXT_SETUP_BTN,
+            command=self._run_setup,
+            height=32,
+        )
+        self._setup_button.grid(row=4, column=0, columnspan=2, padx=20, pady=(4, 0))
+        self._setup_button.grid_remove()
+
         self._warning_label = ctk.CTkLabel(
             self,
             text="",
@@ -404,12 +435,56 @@ class _SettingsDialog(ctk.CTkToplevel):
             wraplength=460,
         )
         self._warning_label.grid(
-            row=3, column=0, columnspan=2, padx=20, pady=(0, 8)
+            row=5, column=0, columnspan=2, padx=20, pady=(4, 8)
         )
+
+    def _on_path_change(self, *_: Any) -> None:
+        """Valide le chemin en temps réel et affiche un indicateur visuel."""
+        path = self._path_var.get().strip()
+        config_file = os.path.join(path, "config.ini")
+        if os.path.isfile(config_file):
+            self._validation_label.configure(
+                text="✓ config.ini trouvé",
+                text_color=_COLOR_VALID,
+            )
+            self._setup_button.grid_remove()
+        else:
+            self._validation_label.configure(
+                text="⚠ config.ini introuvable — exécutez --setup",
+                text_color=_COLOR_DISCONNECTED,
+            )
+            self._setup_button.grid()
+
+    def _run_setup(self) -> None:
+        """Lance cyberghostvpn --setup dans un thread via le contrôleur."""
+        self._save_path_only()
+        self._setup_button.configure(text=_TXT_SETUP_RUNNING, state="disabled")
+        self._warning_label.configure(text="")
+        self._controller.run_setup(
+            lambda result: self.after(0, self._on_setup_done, result)
+        )
+
+    def _on_setup_done(self, result: dict[str, Any]) -> None:
+        """Callback appelé après la fin de --setup (dans le thread principal)."""
+        if result.get("status") == "ok":
+            self._on_path_change()
+            if self._on_save is not None:
+                self._on_save()
+        else:
+            self._setup_button.configure(text=_TXT_SETUP_BTN, state="normal")
+            self._warning_label.configure(
+                text=result.get("message", "Erreur lors de l'initialisation.")
+            )
+
+    def _save_path_only(self) -> None:
+        """Enregistre uniquement le chemin sans fermer la fenêtre."""
+        path = self._path_var.get().strip()
+        if path:
+            set_cyberghost_config_dir(path)
 
     def _browse(self) -> None:
         """Ouvre un sélecteur de dossier natif."""
-        current = self._path_entry.get().strip()
+        current = self._path_var.get().strip()
         if not current or not os.path.isdir(current):
             current = get_cyberghost_config_dir()
         path = filedialog.askdirectory(
@@ -418,12 +493,11 @@ class _SettingsDialog(ctk.CTkToplevel):
             parent=self,
         )
         if path:
-            self._path_entry.delete(0, "end")
-            self._path_entry.insert(0, path)
+            self._path_var.set(path)
 
     def _save(self) -> None:
         """Enregistre le chemin configuré et déclenche un rafraîchissement du statut."""
-        path = self._path_entry.get().strip()
+        path = self._path_var.get().strip()
         if not path:
             self._warning_label.configure(
                 text="Veuillez saisir un chemin valide."

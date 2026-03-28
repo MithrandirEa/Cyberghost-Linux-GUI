@@ -372,3 +372,37 @@ class TestCheckConfig:
         ):
             result = _wrapper.check_config()
         assert result["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# run_setup
+# ---------------------------------------------------------------------------
+
+class TestRunSetup:
+    def test_includes_pkexec(self) -> None:
+        """La commande passée à _run() commence par 'pkexec'."""
+        with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
+            _wrapper.run_setup()
+        args = mock.call_args[0][0]
+        assert args[0] == "pkexec"
+
+    def test_includes_setup_flag(self) -> None:
+        """La commande contient le flag '--setup'."""
+        with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
+            _wrapper.run_setup()
+        args = mock.call_args[0][0]
+        assert "--setup" in args
+
+    def test_includes_home_variable(self) -> None:
+        """La commande passe une variable HOME= au processus."""
+        with patch.object(_wrapper, "_run", return_value=_ok_result()) as mock:
+            _wrapper.run_setup()
+        args = mock.call_args[0][0]
+        assert any(a.startswith("HOME=") for a in args)
+
+    def test_returns_run_result(self) -> None:
+        """run_setup() retransmet le résultat brut de _run()."""
+        expected = _ok_result()
+        with patch.object(_wrapper, "_run", return_value=expected):
+            result = _wrapper.run_setup()
+        assert result is expected
