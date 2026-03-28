@@ -25,10 +25,12 @@ pytestmark = pytest.mark.skipif(
 
 from ui.app_window import (  # noqa: E402  (import conditionnel)
     AppWindow,
+    _SettingsDialog,
     _TXT_CONNECTED,
     _TXT_DISCONNECTED,
     _TXT_INVALID_COUNTRY,
     _TXT_SERVER_PREFIX,
+    _TXT_SETTINGS_TITLE,
 )
 
 
@@ -264,3 +266,47 @@ class TestButtonClick:
         app._controller.disconnect.side_effect = _spy
         app._on_button_click()
         assert combo_states and combo_states[0] == "disabled"
+
+
+# ---------------------------------------------------------------------------
+# _SettingsDialog
+# ---------------------------------------------------------------------------
+
+class TestSettingsDialog:
+    def test_dialog_opens_without_crash(self, app: AppWindow) -> None:
+        """
+        L'ouverture de la fenêtre de paramètres ne doit pas lever TclError.
+        Régression : grab_set() appelé trop tôt provoquait
+        'grab failed: window not viewable'.
+        """
+        try:
+            dialog = _SettingsDialog(app)
+            # Traite les événements en attente (y compris le after(10, grab_set))
+            app.update()
+            dialog.destroy()
+        except Exception as exc:
+            pytest.fail(f"_SettingsDialog a levé une exception inattendue : {exc}")
+
+    def test_dialog_title(self, app: AppWindow) -> None:
+        """La fenêtre de paramètres a le bon titre."""
+        dialog = _SettingsDialog(app)
+        app.update()
+        assert dialog.title() == _TXT_SETTINGS_TITLE
+        dialog.destroy()
+
+    def test_grab_set_deferred_via_after(self, app: AppWindow) -> None:
+        """
+        grab_set() est planifié via after() et non appelé
+        directement dans __init__ (évite TclError sur fenêtre non visible).
+        La fenêtre doit être visible après que les événements en attente
+        sont traités par app.update().
+        """
+        dialog = _SettingsDialog(app)
+        # Avant update(), la fenêtre n'est pas encore rendue
+        assert not dialog.winfo_viewable(), (
+            "La fenêtre ne doit pas encore être visible avant update()"
+        )
+        # Après update(), le after(10, grab_set) est exécuté et la fenêtre est visible
+        app.update()
+        assert dialog.winfo_viewable(), "La fenêtre doit être visible après update()"
+        dialog.destroy()
