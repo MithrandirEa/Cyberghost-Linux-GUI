@@ -48,6 +48,9 @@ def _run(cmd: list[str]) -> dict[str, Any]:
             timeout=_CMD_TIMEOUT,
         )
         _logger.debug("returncode=%d", result.returncode)
+        if result.returncode != 0:
+            _logger.debug("stdout=%r", strip_ansi(result.stdout)[:500])
+            _logger.debug("stderr=%r", strip_ansi(result.stderr)[:500])
         return {
             "status": "ok",
             "stdout": strip_ansi(result.stdout),
