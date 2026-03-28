@@ -7,6 +7,7 @@ standardisé.
 
 import logging
 import os
+import pwd
 import re
 import subprocess
 from typing import Any
@@ -113,6 +114,58 @@ def _get_effective_home() -> str:
     return parent if parent else _get_home()
 
 
+def _ensure_root_config_symlink() -> None:
+    """
+    Crée si nécessaire un lien symbolique entre le répertoire .cyberghost
+    de root (résolu par pwd.getpwuid(0)) et le répertoire de configuration
+    réel de l'utilisateur.
+
+    cyberghostvpn ignore la variable HOME et utilise pwd.getpwuid(0).pw_dir
+    pour localiser sa configuration quand il s'exécute en root via pkexec.
+    Ce lien garantit qu'il trouve les bons fichiers de configuration.
+    """
+    config_dir = get_cyberghost_config_dir()
+    try:
+        root_home = pwd.getpwuid(0).pw_dir
+    except KeyError:
+        _logger.debug("_ensure_root_config_symlink : uid 0 introuvable dans /etc/passwd")
+        return
+
+    root_cyberghost = os.path.join(root_home, ".cyberghost")
+
+    if os.path.abspath(config_dir) == os.path.abspath(root_cyberghost):
+        return  # Les chemins coïncident déjà, rien à faire
+
+    if os.path.islink(root_cyberghost):
+        if os.path.realpath(root_cyberghost) == os.path.realpath(config_dir):
+            _logger.debug(
+                "Lien symbolique déjà correct : %r → %r", root_cyberghost, config_dir
+            )
+            return
+        try:
+            os.unlink(root_cyberghost)
+            _logger.debug("Ancien lien supprimé : %r", root_cyberghost)
+        except OSError as exc:
+            _logger.warning(
+                "Impossible de supprimer le lien existant %r : %s", root_cyberghost, exc
+            )
+            return
+    elif os.path.exists(root_cyberghost):
+        _logger.warning(
+            "%r existe et n'est pas un lien symbolique — lien non créé",
+            root_cyberghost,
+        )
+        return
+
+    try:
+        os.symlink(config_dir, root_cyberghost)
+        _logger.debug("Lien symbolique créé : %r → %r", root_cyberghost, config_dir)
+    except OSError as exc:
+        _logger.warning(
+            "Impossible de créer le lien symbolique %r : %s", root_cyberghost, exc
+        )
+
+
 def check_config() -> dict[str, Any]:
     """
     Vérifie si le fichier de configuration de CyberGhost existe.
@@ -190,6 +243,7 @@ def connect(country_code: str) -> dict[str, Any]:
             f"Code pays invalide : « {country_code} »."
             " Attendu : 2 lettres majuscules (ex : FR, DE)."
         )
+    _ensure_root_config_symlink()
     return _run(
         [
             "pkexec", "env", f"HOME={_get_effective_home()}",
@@ -204,4 +258,5 @@ def disconnect() -> dict[str, Any]:
     Utilise pkexec pour déclencher une boîte de dialogue
     Polkit native (élévation root).
     """
+    _ensure_root_config_symlink()
     return _run(["pkexec", "env", f"HOME={_get_effective_home()}", "cyberghostvpn", "--stop"])
