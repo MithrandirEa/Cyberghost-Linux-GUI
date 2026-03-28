@@ -5,11 +5,14 @@ Il délègue toutes les opérations VPN au VpnController
 via des callbacks thread-safe.
 """
 
+import os
 import re
-from typing import Any
+from tkinter import filedialog
+from typing import Any, Callable
 
 import customtkinter as ctk
 
+from backend.settings import get_cyberghost_config_dir, set_cyberghost_config_dir
 from backend.vpn_controller import VpnController
 
 # --- Constantes de texte (UI en Français) ---
@@ -24,6 +27,13 @@ _TXT_SERVER_PREFIX = "Serveur : "
 _TXT_LOADING = "Chargement des pays…"
 _TXT_NO_COUNTRIES = "Aucun pays disponible"
 _TXT_INVALID_COUNTRY = "Veuillez sélectionner un pays valide."
+_TXT_SETTINGS_BTN = "⚙ Paramètres"
+_TXT_SETTINGS_TITLE = "Paramètres"
+_TXT_SETTINGS_DIR_LABEL = "Répertoire de configuration CyberGhost :"
+_TXT_SETTINGS_BROWSE = "Parcourir…"
+_TXT_SETTINGS_SAVE = "Enregistrer"
+_TXT_SETTINGS_CANCEL = "Annuler"
+_TXT_SETTINGS_SAVED = "Paramètres enregistrés."
 
 # --- Couleurs sémantiques ---
 _COLOR_CONNECTED = "#2fa572"
@@ -55,7 +65,7 @@ class AppWindow(ctk.CTk):
         self._poll_id: str | None = None
 
         self.title("CyberGhost GUI")
-        self.geometry("440x370")
+        self.geometry("440x410")
         self.resizable(False, False)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -143,7 +153,20 @@ class AppWindow(ctk.CTk):
             text_color=_COLOR_DISCONNECTED,
             wraplength=400,
         )
-        self._error_label.grid(row=4, column=0, padx=20, pady=(0, 14))
+        self._error_label.grid(row=4, column=0, padx=20, pady=(0, 6))
+
+        # --- Bouton de paramètres ---
+        self._settings_button = ctk.CTkButton(
+            self,
+            text=_TXT_SETTINGS_BTN,
+            command=self._open_settings,
+            font=ctk.CTkFont(size=11),
+            height=28,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+        )
+        self._settings_button.grid(row=5, column=0, padx=20, pady=(0, 14))
 
     # -------------------------------------------------------------------------
     # Chargement des données (déclenche des threads via le contrôleur)
@@ -300,3 +323,118 @@ class AppWindow(ctk.CTk):
             self.after(0, self._update_ui, status)
 
         self._controller.disconnect(_callback)
+
+    def _open_settings(self) -> None:
+        """Ouvre la fenêtre de paramètres de l'application."""
+        _SettingsDialog(self, on_save=self._refresh_status)
+
+
+# ---------------------------------------------------------------------------
+# Fenêtre de paramètres
+# ---------------------------------------------------------------------------
+
+
+class _SettingsDialog(ctk.CTkToplevel):
+    """
+    Fenêtre modale de paramètres permettant à l'utilisateur de configurer
+    le chemin du répertoire de configuration CyberGhost.
+    """
+
+    def __init__(
+        self,
+        parent: ctk.CTk,
+        on_save: Callable[[], None] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._on_save = on_save
+        self.title(_TXT_SETTINGS_TITLE)
+        self.geometry("500x220")
+        self.resizable(False, False)
+        # Fenêtre modale : bloque les interactions avec la fenêtre parente
+        self.grab_set()
+        self._build()
+
+    def _build(self) -> None:
+        """Construit les widgets de la fenêtre de paramètres."""
+        self.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            self,
+            text=_TXT_SETTINGS_DIR_LABEL,
+            font=ctk.CTkFont(size=13),
+            anchor="w",
+        ).grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 4), sticky="w")
+
+        self._path_entry = ctk.CTkEntry(self, width=360)
+        self._path_entry.insert(0, get_cyberghost_config_dir())
+        self._path_entry.grid(
+            row=1, column=0, padx=(20, 4), pady=4, sticky="ew"
+        )
+
+        ctk.CTkButton(
+            self,
+            text=_TXT_SETTINGS_BROWSE,
+            width=100,
+            command=self._browse,
+        ).grid(row=1, column=1, padx=(0, 20), pady=4)
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=(16, 20))
+
+        ctk.CTkButton(
+            btn_frame,
+            text=_TXT_SETTINGS_SAVE,
+            command=self._save,
+        ).grid(row=0, column=0, padx=8)
+
+        ctk.CTkButton(
+            btn_frame,
+            text=_TXT_SETTINGS_CANCEL,
+            command=self.destroy,
+            fg_color="gray40",
+            hover_color="gray30",
+        ).grid(row=0, column=1, padx=8)
+
+        self._warning_label = ctk.CTkLabel(
+            self,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color=_COLOR_DISCONNECTED,
+            wraplength=460,
+        )
+        self._warning_label.grid(
+            row=3, column=0, columnspan=2, padx=20, pady=(0, 8)
+        )
+
+    def _browse(self) -> None:
+        """Ouvre un sélecteur de dossier natif."""
+        current = self._path_entry.get().strip()
+        if not current or not os.path.isdir(current):
+            current = get_cyberghost_config_dir()
+        path = filedialog.askdirectory(
+            title="Sélectionner le répertoire .cyberghost",
+            initialdir=current,
+            parent=self,
+        )
+        if path:
+            self._path_entry.delete(0, "end")
+            self._path_entry.insert(0, path)
+
+    def _save(self) -> None:
+        """Enregistre le chemin configuré et déclenche un rafraîchissement du statut."""
+        path = self._path_entry.get().strip()
+        if not path:
+            self._warning_label.configure(
+                text="Veuillez saisir un chemin valide."
+            )
+            return
+        if not os.path.isdir(path):
+            self._warning_label.configure(
+                text=f"Attention : le répertoire « {path} » n'existe pas encore. "
+                "Assurez-vous d'exécuter cyberghostvpn --setup au préalable."
+            )
+            # Continue saving — the directory may be created by --setup later
+        set_cyberghost_config_dir(path)
+        self.destroy()
+        if self._on_save is not None:
+            self._on_save()
