@@ -11,6 +11,8 @@ import re
 import subprocess
 from typing import Any
 
+from backend.settings import get_cyberghost_config_dir
+
 _logger = logging.getLogger(__name__)
 
 # Délai maximum (secondes) accordé à chaque commande CLI.
@@ -94,15 +96,28 @@ def _get_home() -> str:
     return os.environ.get("HOME", os.path.expanduser("~"))
 
 
+def _get_effective_home() -> str:
+    """
+    Retourne le HOME effectif déduit du répertoire de configuration CyberGhost.
+
+    Permet de passer le bon HOME à pkexec même quand l'application est
+    lancée en root mais que la configuration CyberGhost appartient à
+    l'utilisateur réel (ex: /home/user/.cyberghost → HOME=/home/user).
+    """
+    return os.path.dirname(get_cyberghost_config_dir())
+
+
 def check_config() -> dict[str, Any]:
     """
     Vérifie si le fichier de configuration de CyberGhost existe.
 
     Retourne un dictionnaire standardisé avec status='ok' si le fichier est
     présent, status='error' sinon (avec un message explicite).
-    Le chemin vérifié est $HOME/.cyberghost/config.ini.
+    Le chemin vérifié est le répertoire configuré dans les paramètres
+    de l'application (par défaut $HOME/.cyberghost/config.ini).
     """
-    config_path = os.path.join(_get_home(), ".cyberghost", "config.ini")
+    config_dir = get_cyberghost_config_dir()
+    config_path = os.path.join(config_dir, "config.ini")
     if os.path.isfile(config_path):
         return {"status": "ok", "stdout": "", "stderr": "", "returncode": 0}
     msg = (
@@ -152,7 +167,7 @@ def connect(country_code: str) -> dict[str, Any]:
         )
     return _run(
         [
-            "pkexec", "env", f"HOME={_get_home()}",
+            "pkexec", "env", f"HOME={_get_effective_home()}",
             "cyberghostvpn", "--country-code", country_code, "--connect",
         ]
     )
@@ -164,4 +179,4 @@ def disconnect() -> dict[str, Any]:
     Utilise pkexec pour déclencher une boîte de dialogue
     Polkit native (élévation root).
     """
-    return _run(["pkexec", "env", f"HOME={_get_home()}", "cyberghostvpn", "--stop"])
+    return _run(["pkexec", "env", f"HOME={_get_effective_home()}", "cyberghostvpn", "--stop"])

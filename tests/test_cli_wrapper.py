@@ -319,14 +319,21 @@ class TestCheckConfig:
         config_dir = tmp_path / ".cyberghost"
         config_dir.mkdir()
         (config_dir / "config.ini").write_text("[General]")
-        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+        with patch(
+            "backend.cli_wrapper.get_cyberghost_config_dir",
+            return_value=str(config_dir),
+        ):
             result = _wrapper.check_config()
         assert result["status"] == "ok"
         assert result["returncode"] == 0
 
     def test_returns_error_when_config_missing(self, tmp_path: Any) -> None:
         """Retourne status='error' si le fichier config.ini est absent."""
-        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+        config_dir = tmp_path / ".cyberghost"
+        with patch(
+            "backend.cli_wrapper.get_cyberghost_config_dir",
+            return_value=str(config_dir),
+        ):
             result = _wrapper.check_config()
         assert result["status"] == "error"
         assert result["returncode"] == -1
@@ -334,13 +341,33 @@ class TestCheckConfig:
 
     def test_error_message_contains_config_path(self, tmp_path: Any) -> None:
         """Le message d'erreur mentionne le chemin du fichier manquant."""
-        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+        config_dir = tmp_path / ".cyberghost"
+        with patch(
+            "backend.cli_wrapper.get_cyberghost_config_dir",
+            return_value=str(config_dir),
+        ):
             result = _wrapper.check_config()
         assert ".cyberghost" in result["message"]
         assert "config.ini" in result["message"]
 
     def test_error_message_contains_setup_hint(self, tmp_path: Any) -> None:
         """Le message d'erreur inclut une indication pour lancer --setup."""
-        with patch.dict(_wrapper.os.environ, {"HOME": str(tmp_path)}):
+        config_dir = tmp_path / ".cyberghost"
+        with patch(
+            "backend.cli_wrapper.get_cyberghost_config_dir",
+            return_value=str(config_dir),
+        ):
             result = _wrapper.check_config()
         assert "--setup" in result["message"]
+
+    def test_uses_configured_dir(self, tmp_path: Any) -> None:
+        """check_config() utilise le répertoire configuré dans les paramètres."""
+        custom_dir = tmp_path / "custom_cyberghost"
+        custom_dir.mkdir()
+        (custom_dir / "config.ini").write_text("[General]")
+        with patch(
+            "backend.cli_wrapper.get_cyberghost_config_dir",
+            return_value=str(custom_dir),
+        ):
+            result = _wrapper.check_config()
+        assert result["status"] == "ok"
