@@ -350,9 +350,10 @@ class _SettingsDialog(ctk.CTkToplevel):
         self.title(_TXT_SETTINGS_TITLE)
         self.geometry("500x220")
         self.resizable(False, False)
-        # Fenêtre modale : bloque les interactions avec la fenêtre parente
-        self.grab_set()
         self._build()
+        # Fenêtre modale : différé via after() pour garantir que la fenêtre
+        # est visible avant l'appel à grab_set() (évite TclError).
+        self.after(10, self.grab_set)
 
     def _build(self) -> None:
         """Construit les widgets de la fenêtre de paramètres."""
